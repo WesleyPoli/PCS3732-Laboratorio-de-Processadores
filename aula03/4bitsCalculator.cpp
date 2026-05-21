@@ -1,4 +1,3 @@
-// Calculadora de 4 bits em complemento de 2
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Adafruit_NeoPixel.h>
@@ -7,7 +6,7 @@
 // Configuração Wi-Fi AP
 // ======================
 
-const char* ssid = "Calculadora_ESP32";
+const char* ssid = "Calculadora_ESP32_m";
 const char* password = "12345678";
 
 // Servidor HTTP na porta 80
@@ -55,20 +54,6 @@ bool isBinary4(String value) {
   return true;
 }
 
-int binaryStringToUnsigned4(String value) {
-  int result = 0;
-
-  for (int i = 0; i < 4; i++) {
-    result = result << 1;
-
-    if (value[i] == '1') {
-      result = result | 1;
-    }
-  }
-
-  return result & 0x0F;
-}
-
 int toSigned4(int value) {
   value = value & 0x0F;
 
@@ -77,25 +62,6 @@ int toSigned4(int value) {
   }
 
   return value;
-}
-
-void updateOutputLeds(int result4bits) {
-  result4bits = result4bits & 0x0F;
-
-  digitalWrite(LED_BIT0, result4bits & 0x01);
-  digitalWrite(LED_BIT1, result4bits & 0x02);
-  digitalWrite(LED_BIT2, result4bits & 0x04);
-  digitalWrite(LED_BIT3, result4bits & 0x08);
-}
-
-void setStatusLed(bool overflow) {
-  if (overflow) {
-    onboardLed.setPixelColor(0, onboardLed.Color(255, 0, 0)); // vermelho
-  } else {
-    onboardLed.setPixelColor(0, onboardLed.Color(0, 80, 0)); // verde
-  }
-
-  onboardLed.show();
 }
 
 String toBinary4(int value) {
@@ -114,18 +80,44 @@ String toBinary4(int value) {
   return output;
 }
 
-bool detectOverflowAdd(int aSigned, int bSigned, int resultSigned) {
-  bool aPositive = aSigned >= 0;
-  bool bPositive = bSigned >= 0;
-  bool resultPositive = resultSigned >= 0;
+void updateOutputLeds(int resultado) {
+  // 3. Mascaramento, garantindo 4 bits
+  resultado = resultado & 0x0F;
+
+  // 4. Output para GPIO
+  digitalWrite(LED_BIT0, resultado & 0x01);
+  digitalWrite(LED_BIT1, resultado & 0x02);
+  digitalWrite(LED_BIT2, resultado & 0x04);
+  digitalWrite(LED_BIT3, resultado & 0x08);
+}
+
+void setStatusLed(bool overflow, int resultadoAssinado) {
+  if (overflow) {
+    // Overflow tem prioridade sobre positivo, negativo ou zero
+    onboardLed.setPixelColor(0, onboardLed.Color(80, 80, 0)); // amarelo
+  } else if (resultadoAssinado == 0) {
+    onboardLed.setPixelColor(0, onboardLed.Color(0, 0, 80)); // azul
+  } else if (resultadoAssinado > 0) {
+    onboardLed.setPixelColor(0, onboardLed.Color(0, 80, 0)); // verde
+  } else {
+    onboardLed.setPixelColor(0, onboardLed.Color(80, 0, 0)); // vermelho
+  }
+
+  onboardLed.show();
+}
+
+bool detectOverflowAdd(int valA, int valB, int resultadoAssinado) {
+  bool aPositive = valA >= 0;
+  bool bPositive = valB >= 0;
+  bool resultPositive = resultadoAssinado >= 0;
 
   return (aPositive == bPositive) && (resultPositive != aPositive);
 }
 
-bool detectOverflowSub(int aSigned, int bSigned, int resultSigned) {
-  bool aPositive = aSigned >= 0;
-  bool bPositive = bSigned >= 0;
-  bool resultPositive = resultSigned >= 0;
+bool detectOverflowSub(int valA, int valB, int resultadoAssinado) {
+  bool aPositive = valA >= 0;
+  bool bPositive = valB >= 0;
+  bool resultPositive = resultadoAssinado >= 0;
 
   return (aPositive != bPositive) && (resultPositive != aPositive);
 }
@@ -156,7 +148,7 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   html += "<head>";
   html += "<meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-  html += "<title>Calculadora ESP32</title>";
+  html += "<title>Calculadora ESP32 m</title>";
 
   html += "<style>";
   html += "body{font-family:Arial;background:#f4f6f8;margin:0;padding:20px;color:#222;}";
@@ -179,6 +171,7 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   html += "<h1>Calculadora ESP32-C3</h1>";
 
   html += "<form action='/calc' method='GET'>";
+
   html += "<label>Operando A - 4 bits</label>";
   html += "<input type='text' name='a' maxlength='4' value='" + a + "' pattern='[01]{4}' required>";
 
@@ -201,7 +194,7 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
 
   html += "<div class='small'>";
   html += "<p>Faixa em complemento de dois com 4 bits: -8 até +7.</p>";
-  html += "<p>GPIO4 = bit0, GPIO5 = bit1, GPIO6 = bit2, GPIO7 = bit3.</p>";
+  html += "<p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0.</p>";
   html += "</div>";
 
   html += "</div>";
@@ -220,12 +213,12 @@ void handleRoot() {
 }
 
 void handleCalc() {
-  String aStr = server.arg("a");
-  String bStr = server.arg("b");
+  String paramA = server.arg("a");
+  String paramB = server.arg("b");
   String op = server.arg("op");
 
-  if (!isBinary4(aStr) || !isBinary4(bStr)) {
-    server.send(400, "text/html", makePage(aStr, bStr, op, "----", "--", "Erro: use exatamente 4 bits em A e B", true));
+  if (!isBinary4(paramA) || !isBinary4(paramB)) {
+    server.send(400, "text/html", makePage(paramA, paramB, op, "----", "--", "Erro: use exatamente 4 bits em A e B", true));
     return;
   }
 
@@ -233,36 +226,40 @@ void handleCalc() {
     op = "add";
   }
 
-  int aRaw = binaryStringToUnsigned4(aStr);
-  int bRaw = binaryStringToUnsigned4(bStr);
+  // 1. Parsing: String para Inteiro
+  int valA_raw = strtol(paramA.c_str(), NULL, 2);
+  int valB_raw = strtol(paramB.c_str(), NULL, 2);
 
-  int aSigned = toSigned4(aRaw);
-  int bSigned = toSigned4(bRaw);
+  // Complemento de dois: interpretação assinada de 4 bits
+  int valA = toSigned4(valA_raw);
+  int valB = toSigned4(valB_raw);
 
-  int fullResult;
+  // 2. Operação Aritmética em C nativo
+  int resultadoCompleto = (op == "add") ? (valA + valB) : (valA - valB);
 
-  if (op == "add") {
-    fullResult = aSigned + bSigned;
-  } else {
-    fullResult = aSigned - bSigned;
-  }
+  // 3. Mascaramento, garantindo 4 bits
+  int resultado = resultadoCompleto & 0x0F;
 
-  int result4bits = fullResult & 0x0F;
-  int resultSigned = toSigned4(result4bits);
+  // Complemento de dois: resultado assinado de 4 bits
+  int resultadoAssinado = toSigned4(resultado);
 
+  // Detecção de overflow
   bool overflow;
 
   if (op == "add") {
-    overflow = detectOverflowAdd(aSigned, bSigned, resultSigned);
+    overflow = detectOverflowAdd(valA, valB, resultadoAssinado);
   } else {
-    overflow = detectOverflowSub(aSigned, bSigned, resultSigned);
+    overflow = detectOverflowSub(valA, valB, resultadoAssinado);
   }
 
-  updateOutputLeds(result4bits);
-  setStatusLed(overflow);
+  // 4. Output para GPIO
+  updateOutputLeds(resultado);
 
-  String resultBin = toBinary4(result4bits);
-  String resultDec = String(resultSigned);
+  // LED onboard indica status
+  setStatusLed(overflow, resultadoAssinado);
+
+  String resultBin = toBinary4(resultado);
+  String resultDec = String(resultadoAssinado);
 
   String status;
 
@@ -272,7 +269,7 @@ void handleCalc() {
     status = "OK";
   }
 
-  server.send(200, "text/html", makePage(aStr, bStr, op, resultBin, resultDec, status, overflow));
+  server.send(200, "text/html", makePage(paramA, paramB, op, resultBin, resultDec, status, overflow));
 }
 
 // ======================
