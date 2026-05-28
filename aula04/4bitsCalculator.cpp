@@ -1,8 +1,10 @@
-// Após conectar na rede wi-fi, acessar o front pelo IP 192.168.4.1
+// Após conectar na rede Wi-Fi, acessar o front pelo IP 192.168.4.1
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Adafruit_NeoPixel.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 // ======================
 // Configuração Wi-Fi AP
@@ -13,6 +15,13 @@ const char* password = "12345678";
 
 // Servidor HTTP na porta 80
 WebServer server(80);
+
+// ======================
+// Modos da calculadora
+// ======================
+
+#define BASE_BITS 4
+#define EXPANDED_BITS 16
 
 // ======================
 // NeoPixel onboard
@@ -32,6 +41,9 @@ Adafruit_NeoPixel onboardLed(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800)
 // GPIO5 = bit 2
 // GPIO6 = bit 1
 // GPIO7 = bit 0, menos significativo
+//
+// Observação: no modo expandido, os LEDs físicos mostram apenas os 4 bits
+// menos significativos do resultado, pois o hardware possui 4 LEDs externos.
 
 #define LED_BIT0 7
 #define LED_BIT1 6
@@ -41,28 +53,35 @@ Adafruit_NeoPixel onboardLed(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800)
 // ======================
 // Funções auxiliares
 // ======================
- 
-// Calcula fatorial 
-  int fatorial(int n){
-    if(n <= 1){
-      return 1; 
-    }
 
-    int resultado = 1;
+uint32_t maskForBits(int bits) {
+  return (1UL << bits) - 1UL;
+}
 
-    for(int i = 2; i <= n; i++){
-      resultado *= i;
-    }
+int32_t minSignedValue(int bits) {
+  return -(1L << (bits - 1));
+}
 
-    return resultado;
+int32_t maxSignedValue(int bits) {
+  return (1L << (bits - 1)) - 1;
+}
+
+String zeroBits(int bits) {
+  String output = "";
+
+  for (int i = 0; i < bits; i++) {
+    output += "0";
   }
 
-bool isBinary4(String value) {
-  if (value.length() != 4) {
+  return output;
+}
+
+bool isBinaryN(String value, int bits) {
+  if (value.length() != bits) {
     return false;
   }
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < bits; i++) {
     if (value[i] != '0' && value[i] != '1') {
       return false;
     }
@@ -71,23 +90,35 @@ bool isBinary4(String value) {
   return true;
 }
 
-int toSigned4(int value) {
-  value = value & 0x0F;
-
-  if (value & 0x08) {
-    return value - 16;
-  }
-
-  return value;
+bool isBinary4(String value) {
+  return isBinaryN(value, BASE_BITS);
 }
 
-String toBinary4(int value) {
-  value = value & 0x0F;
+int32_t toSignedBits(uint32_t value, int bits) {
+  uint32_t mask = maskForBits(bits);
+  uint32_t signBit = 1UL << (bits - 1);
+
+  value = value & mask;
+
+  if (value & signBit) {
+    return (int32_t)value - (int32_t)(1UL << bits);
+  }
+
+  return (int32_t)value;
+}
+
+int toSigned4(int value) {
+  return (int)toSignedBits((uint32_t)value, BASE_BITS);
+}
+
+String toBinaryBits(uint32_t value, int bits) {
+  uint32_t mask = maskForBits(bits);
+  value = value & mask;
 
   String output = "";
 
-  for (int i = 3; i >= 0; i--) {
-    if (value & (1 << i)) {
+  for (int i = bits - 1; i >= 0; i--) {
+    if (value & (1UL << i)) {
       output += "1";
     } else {
       output += "0";
@@ -97,27 +128,63 @@ String toBinary4(int value) {
   return output;
 }
 
-void updateOutputLeds(int resultado) {
-  // 3. Mascaramento, garantindo 4 bits
+String toBinary4(int value) {
+  return toBinaryBits((uint32_t)value, BASE_BITS);
+}
+
+long long fatorialLimitado(int n, int32_t maxRepresentavel, bool* overflowPorLimite) {
+  long long resultado = 1;
+  long long limite = (long long)maxRepresentavel;
+
+  *overflowPorLimite = false;
+
+  if (n <= 1) {
+    return 1;
+  }
+
+  for (int i = 2; i <= n; i++) {
+    if (resultado > limite / i) {
+      *overflowPorLimite = true;
+      return limite + 1;
+    }
+
+    resultado *= i;
+  }
+
+  return resultado;
+}
+
+int fatorial(int n) {
+  if (n <= 1) {
+    return 1;
+  }
+
+  int resultado = 1;
+
+  for (int i = 2; i <= n; i++) {
+    resultado *= i;
+  }
+
+  return resultado;
+}
+
+void updateOutputLeds(uint32_t resultado) {
+  // Hardware físico de 4 LEDs: mostra apenas os 4 bits menos significativos.
   resultado = resultado & 0x0F;
 
-  // 4. Output para GPIO
   digitalWrite(LED_BIT0, resultado & 0x01);
   digitalWrite(LED_BIT1, resultado & 0x02);
   digitalWrite(LED_BIT2, resultado & 0x04);
   digitalWrite(LED_BIT3, resultado & 0x08);
 }
 
-void setStatusLed(bool overflow, int resultado4bits
-) {
+void setStatusLed(bool overflow, int32_t resultadoAssinado) {
   if (overflow) {
     // Overflow tem prioridade sobre positivo, negativo ou zero
     onboardLed.setPixelColor(0, onboardLed.Color(80, 80, 0)); // amarelo
-  } else if (resultado4bits
-     == 0) {
+  } else if (resultadoAssinado == 0) {
     onboardLed.setPixelColor(0, onboardLed.Color(0, 0, 80)); // azul
-  } else if (resultado4bits
-     > 0) {
+  } else if (resultadoAssinado > 0) {
     onboardLed.setPixelColor(0, onboardLed.Color(0, 80, 0)); // verde
   } else {
     onboardLed.setPixelColor(0, onboardLed.Color(80, 0, 0)); // vermelho
@@ -126,26 +193,21 @@ void setStatusLed(bool overflow, int resultado4bits
   onboardLed.show();
 }
 
-bool detectOverflowAdd(int valA, int valB, int resultado4bits
-) {
+bool detectOverflowAdd(int valA, int valB, int resultadoAssinado) {
   bool aPositive = valA >= 0;
   bool bPositive = valB >= 0;
-  bool resultPositive = resultado4bits
-   >= 0;
+  bool resultPositive = resultadoAssinado >= 0;
 
   return (aPositive == bPositive) && (resultPositive != aPositive);
 }
 
-bool detectOverflowSub(int valA, int valB, int resultado4bits
-) {
+bool detectOverflowSub(int valA, int valB, int resultadoAssinado) {
   bool aPositive = valA >= 0;
   bool bPositive = valB >= 0;
-  bool resultPositive = resultado4bits
-   >= 0;
+  bool resultPositive = resultadoAssinado >= 0;
 
   return (aPositive != bPositive) && (resultPositive != aPositive);
 }
-
 
 
 // ======================
@@ -297,9 +359,18 @@ void runRegressionTests() {
 // Página HTML
 // ======================
 
-String makePage(String a = "0011", String b = "0010", String op = "add",
+String makePage(String a = "0011", String b = "0010", String op = "add", String mode = "4",
                 String resultBin = "----", String resultDec = "--",
                 String status = "Aguardando cálculo", bool overflow = false) {
+
+  if (mode != "16") {
+    mode = "4";
+  }
+
+  int bits = (mode == "16") ? EXPANDED_BITS : BASE_BITS;
+
+  String checked4 = (mode == "4") ? "checked" : "";
+  String checked16 = (mode == "16") ? "checked" : "";
 
   String checkedAdd = "";
   String checkedSub = "";
@@ -329,16 +400,18 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
 
   html += "<style>";
   html += "body{font-family:Arial;background:#f4f6f8;margin:0;padding:20px;color:#222;}";
-  html += ".box{max-width:520px;margin:auto;background:white;padding:20px;border-radius:12px;box-shadow:0 0 12px #ccc;}";
+  html += ".box{max-width:620px;margin:auto;background:white;padding:20px;border-radius:12px;box-shadow:0 0 12px #ccc;}";
   html += "h1{text-align:center;font-size:26px;}";
   html += "label{display:block;margin-top:14px;font-weight:bold;}";
-  html += "input[type=text]{width:100%;font-size:22px;padding:10px;margin-top:6px;box-sizing:border-box;text-align:center;letter-spacing:4px;}";
-  html += ".ops{margin-top:14px;font-size:18px;}";
+  html += "input[type=text]{width:100%;font-size:20px;padding:10px;margin-top:6px;box-sizing:border-box;text-align:center;letter-spacing:3px;}";
+  html += ".ops,.modes{margin-top:14px;font-size:18px;}";
+  html += ".ops label,.modes label{font-weight:normal;margin-top:8px;}";
   html += "button{width:100%;font-size:20px;margin-top:20px;padding:12px;border:0;border-radius:8px;background:#1e88e5;color:white;}";
-  html += ".result{margin-top:22px;padding:14px;border-radius:8px;background:#eef3f8;font-size:18px;}";
+  html += ".result{margin-top:22px;padding:14px;border-radius:8px;background:#eef3f8;font-size:18px;word-break:break-word;}";
   html += ".ok{color:#0a8f08;font-weight:bold;}";
   html += ".overflow{color:#d00000;font-weight:bold;}";
-  html += ".small{font-size:14px;color:#666;margin-top:20px;}";
+  html += ".small{font-size:14px;color:#666;margin-top:20px;line-height:1.4;}";
+  html += ".card{border:1px solid #d7e2ee;border-radius:10px;padding:12px;margin-top:12px;background:#fafcff;}";
   html += "</style>";
 
   html += "</head>";
@@ -349,19 +422,28 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
 
   html += "<form action='/calc' method='GET'>";
 
-  html += "<label>Operando A - 4 bits</label>";
-  html += "<input type='text' name='a' maxlength='4' value='" + a + "' pattern='[01]{4}' required>";
+  html += "<div class='card'>";
+  html += "<strong>Modo de operandos</strong>";
+  html += "<div class='modes'>";
+  html += "<label><input type='radio' name='mode' value='4' " + checked4 + " onchange='toggleMode()'> Original - 4 bits</label>";
+  html += "<label><input type='radio' name='mode' value='16' " + checked16 + " onchange='toggleMode()'> Expandido - 16 bits</label>";
+  html += "</div>";
+  html += "</div>";
+
+  html += "<label id='labelA'>Operando A - " + String(bits) + " bits</label>";
+  html += "<input id='inputA' type='text' name='a' maxlength='" + String(bits) + "' value='" + a + "' pattern='[01]{" + String(bits) + "}' required>";
 
   html += "<div id='campoB'>";
-  html += "<label>Operando B - 4 bits</label>";
-  html += "<input id='inputB' type='text' name='b' maxlength='4' value='" + b + "' pattern='[01]{4}' required>";
+  html += "<label id='labelB'>Operando B - " + String(bits) + " bits</label>";
+  html += "<input id='inputB' type='text' name='b' maxlength='" + String(bits) + "' value='" + b + "' pattern='[01]{" + String(bits) + "}' required>";
   html += "</div>";
 
   html += "<div class='ops'>";
-  html += "<label><input type='radio' name='op' value='add' " + checkedAdd + " onchange='toggleB()'> Soma</label>";
-  html += "<label><input type='radio' name='op' value='sub' " + checkedSub + " onchange='toggleB()'> Subtração</label>";
-  html += "<label><input type='radio' name='op' value='mul' " + checkedMul + " onchange='toggleB()'> Multiplicação</label>";
-  html += "<label><input type='radio' name='op' value='fat' " + checkedFat + " onchange='toggleB()'> Fatorial de A</label>";
+  html += "<strong>Operação</strong>";
+  html += "<label><input type='radio' name='op' value='add' " + checkedAdd + " onchange='toggleMode()'> Soma</label>";
+  html += "<label><input type='radio' name='op' value='sub' " + checkedSub + " onchange='toggleMode()'> Subtração</label>";
+  html += "<label><input type='radio' name='op' value='mul' " + checkedMul + " onchange='toggleMode()'> Multiplicação</label>";
+  html += "<label><input type='radio' name='op' value='fat' " + checkedFat + " onchange='toggleMode()'> Fatorial de A</label>";
   html += "</div>";
 
   html += "<button type='submit'>Calcular</button>";
@@ -373,27 +455,44 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   html += "<p><strong>Status:</strong> <span class='" + statusClass + "'>" + status + "</span></p>";
   html += "</div>";
 
-  html += "<div class='small'>";
-  html += "<p>Faixa em complemento de dois com 4 bits: -8 até +7.</p>";
-  html += "<p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0.</p>";
+  html += "<div class='small' id='infoModo'>";
+  if (mode == "16") {
+    html += "<p>Modo expandido: 16 bits em complemento de dois. Faixa assinada: -32768 até +32767. Valor bruto máximo: 65535.</p>";
+  } else {
+    html += "<p>Modo original: 4 bits em complemento de dois. Faixa assinada: -8 até +7. Valor bruto máximo: 15.</p>";
+  }
+  html += "<p>No modo fatorial, apenas o operando A é usado.</p>";
+  html += "<p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>";
   html += "</div>";
 
   html += "</div>";
 
   html += "<script>";
-  html += "function toggleB(){";
-  html += "  var fat = document.querySelector(\"input[name='op'][value='fat']\").checked;";
-  html += "  var campoB = document.getElementById('campoB');";
-  html += "  var inputB = document.getElementById('inputB');";
-  html += "  if(fat){";
-  html += "    campoB.style.display = 'none';";
-  html += "    inputB.required = false;";
-  html += "  } else {";
-  html += "    campoB.style.display = 'block';";
-  html += "    inputB.required = true;";
-  html += "  }";
+  html += "function getBits(){return document.querySelector(\"input[name='mode']:checked\").value === '16' ? 16 : 4;}";
+  html += "function onlyBinary(value){return value.replace(/[^01]/g,'');}";
+  html += "function normalizeInput(input,bits){";
+  html += "  input.value = onlyBinary(input.value);";
+  html += "  if(input.value.length > bits){input.value = input.value.slice(input.value.length - bits);}";
+  html += "  if(input.value.length < bits){input.value = input.value.padStart(bits,'0');}";
   html += "}";
-  html += "window.onload = toggleB;";
+  html += "function toggleMode(){";
+  html += "  var bits = getBits();";
+  html += "  var fat = document.querySelector(\"input[name='op'][value='fat']\").checked;";
+  html += "  var inputA = document.getElementById('inputA');";
+  html += "  var inputB = document.getElementById('inputB');";
+  html += "  var campoB = document.getElementById('campoB');";
+  html += "  document.getElementById('labelA').innerHTML = 'Operando A - ' + bits + ' bits';";
+  html += "  document.getElementById('labelB').innerHTML = 'Operando B - ' + bits + ' bits';";
+  html += "  inputA.maxLength = bits; inputB.maxLength = bits;";
+  html += "  inputA.pattern = '[01]{' + bits + '}'; inputB.pattern = '[01]{' + bits + '}';";
+  html += "  normalizeInput(inputA,bits); normalizeInput(inputB,bits);";
+  html += "  if(fat){campoB.style.display='none'; inputB.required=false;}";
+  html += "  else{campoB.style.display='block'; inputB.required=true;}";
+  html += "  var info = document.getElementById('infoModo');";
+  html += "  if(bits === 16){info.innerHTML = '<p>Modo expandido: 16 bits em complemento de dois. Faixa assinada: -32768 até +32767. Valor bruto máximo: 65535.</p><p>No modo fatorial, apenas o operando A é usado.</p><p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>';}";
+  html += "  else{info.innerHTML = '<p>Modo original: 4 bits em complemento de dois. Faixa assinada: -8 até +7. Valor bruto máximo: 15.</p><p>No modo fatorial, apenas o operando A é usado.</p><p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>';}";
+  html += "}";
+  html += "window.onload = toggleMode;";
   html += "</script>";
 
   html += "</body>";
@@ -414,72 +513,88 @@ void handleCalc() {
   String paramA = server.arg("a");
   String paramB = server.arg("b");
   String op = server.arg("op");
+  String mode = server.arg("mode");
+
+  if (mode != "16") {
+    mode = "4";
+  }
+
+  int bits = (mode == "16") ? EXPANDED_BITS : BASE_BITS;
 
   if (op != "add" && op != "sub" && op != "mul" && op != "fat") {
     op = "add";
   }
 
   if (op == "fat") {
-    if (!isBinary4(paramA)) {
-      server.send(400, "text/html", makePage(paramA, paramB, op, "----", "--", "Erro: use exatamente 4 bits em A", true));
+    if (!isBinaryN(paramA, bits)) {
+      String erro = "Erro: use exatamente " + String(bits) + " bits em A";
+      server.send(400, "text/html", makePage(paramA, paramB, op, mode, "----", "--", erro, true));
       return;
     }
 
     // No fatorial, o operando B não é usado.
-    paramB = "0000";
+    paramB = zeroBits(bits);
   } else {
-    if (!isBinary4(paramA) || !isBinary4(paramB)) {
-      server.send(400, "text/html", makePage(paramA, paramB, op, "----", "--", "Erro: use exatamente 4 bits em A e B", true));
+    if (!isBinaryN(paramA, bits) || !isBinaryN(paramB, bits)) {
+      String erro = "Erro: use exatamente " + String(bits) + " bits em A e B";
+      server.send(400, "text/html", makePage(paramA, paramB, op, mode, "----", "--", erro, true));
       return;
     }
   }
 
-  // 1. Parsing: string binária para inteiro
-  int valA_raw = strtol(paramA.c_str(), NULL, 2);
-  int valB_raw = strtol(paramB.c_str(), NULL, 2);
+  // 1. Parsing: string binária para inteiro bruto
+  uint32_t valA_raw = strtoul(paramA.c_str(), NULL, 2);
+  uint32_t valB_raw = strtoul(paramB.c_str(), NULL, 2);
 
-  // Complemento de dois: interpretação com sinal de 4 bits
-  int valA = toSigned4(valA_raw);
-  int valB = toSigned4(valB_raw);
+  // 2. Interpretação em complemento de dois conforme o modo escolhido
+  int32_t valA = toSignedBits(valA_raw, bits);
+  int32_t valB = toSignedBits(valB_raw, bits);
 
-  // 2. Operação aritmética em C++ nativo
-  int resultadoCompleto = (op == "add") ? (valA + valB)
-                        : (op == "sub") ? (valA - valB)
-                        : (op == "mul") ? (valA * valB)
-                        : (op == "fat") ? fatorial(valA)
-                        : 0;
+  int32_t limiteMin = minSignedValue(bits);
+  int32_t limiteMax = maxSignedValue(bits);
 
-  // 3. Mascaramento, garantindo 4 bits
-  int resultado = resultadoCompleto & 0x0F;
-
-  // Complemento de dois: resultado assinado de 4 bits
-  int resultado4bits
-   = toSigned4(resultado);
-
-  // Detecção de overflow
-  bool overflow = false;
+  // 3. Operação aritmética em C++ nativo
+  long long resultadoCompleto = 0;
+  bool erroFatorialNegativo = false;
+  bool overflowFatorialAntecipado = false;
 
   if (op == "add") {
-    overflow = detectOverflowAdd(valA, valB, resultado4bits
-    );
+    resultadoCompleto = (long long)valA + (long long)valB;
   } else if (op == "sub") {
-    overflow = detectOverflowSub(valA, valB, resultado4bits
-    );
-  } else if (op == "mul" || op == "fat") {
-    // Em 4 bits com sinal, a faixa representável é de -8 até +7.
-    overflow = (resultadoCompleto < -8 || resultadoCompleto > 7);
+    resultadoCompleto = (long long)valA - (long long)valB;
+  } else if (op == "mul") {
+    resultadoCompleto = (long long)valA * (long long)valB;
+  } else if (op == "fat") {
+    if (valA < 0) {
+      erroFatorialNegativo = true;
+    } else {
+      resultadoCompleto = fatorialLimitado((int)valA, limiteMax, &overflowFatorialAntecipado);
+    }
   }
 
-  // 4. Output para GPIO
-  updateOutputLeds(resultado);
+  if (erroFatorialNegativo) {
+    server.send(400, "text/html", makePage(paramA, paramB, op, mode, "----", "--", "Erro: fatorial não existe para número negativo", true));
+    return;
+  }
+
+  // 4. Detecção de overflow para qualquer operação e qualquer modo
+  bool overflow = overflowFatorialAntecipado ||
+                  (resultadoCompleto < (long long)limiteMin || resultadoCompleto > (long long)limiteMax);
+
+  // 5. Mascaramento conforme a quantidade de bits do modo escolhido
+  uint32_t resultadoMascarado = ((uint32_t)resultadoCompleto) & maskForBits(bits);
+
+  // 6. Resultado assinado após o mascaramento em complemento de dois
+  int32_t resultadoAssinado = toSignedBits(resultadoMascarado, bits);
+
+  // 7. Output para GPIO
+  updateOutputLeds(resultadoMascarado);
 
   // LED onboard indica status
-  setStatusLed(overflow, resultado4bits
-  );
+  setStatusLed(overflow, resultadoAssinado);
 
-  String resultBin = toBinary4(resultado);
-  String resultDec = String(resultado4bits
-  );
+  String resultBin = toBinaryBits(resultadoMascarado, bits);
+  String resultDec = String((long)resultadoAssinado);
 
   String status;
 
@@ -489,7 +604,7 @@ void handleCalc() {
     status = "OK";
   }
 
-  server.send(200, "text/html", makePage(paramA, paramB, op, resultBin, resultDec, status, overflow));
+  server.send(200, "text/html", makePage(paramA, paramB, op, mode, resultBin, resultDec, status, overflow));
 }
 
 // ======================
@@ -498,6 +613,8 @@ void handleCalc() {
 
 void setup() {
   Serial.begin(115200);
+
+  runRegressionTests();
 
   pinMode(LED_BIT0, OUTPUT);
   pinMode(LED_BIT1, OUTPUT);
@@ -529,8 +646,6 @@ void setup() {
   server.begin();
 
   Serial.println("Servidor HTTP iniciado");
-
-  runRegressionTests();
 }
 
 void loop() {
