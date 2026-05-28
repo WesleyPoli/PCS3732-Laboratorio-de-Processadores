@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Adafruit_NeoPixel.h>
+#include <string.h>
 
 // ======================
 // Configuração Wi-Fi AP
@@ -143,6 +144,153 @@ bool detectOverflowSub(int valA, int valB, int resultado4bits
    >= 0;
 
   return (aPositive != bPositive) && (resultPositive != aPositive);
+}
+
+
+
+// ======================
+// Testes de regressao
+// ======================
+
+bool runRegressionCase(const char* nome,
+                       const char* op,
+                       int aRaw,
+                       int bRaw,
+                       int resultadoCompletoEsperado,
+                       int resultado4bitsEsperado,
+                       bool overflowEsperado) {
+  int valA = toSigned4(aRaw);
+  int valB = toSigned4(bRaw);
+
+  bool isAdd = strcmp(op, "add") == 0;
+
+  int resultadoCompleto;
+
+  if (isAdd) {
+    resultadoCompleto = valA + valB;
+  } else {
+    resultadoCompleto = valA - valB;
+  }
+
+  int resultadoMascarado = resultadoCompleto & 0x0F;
+  int resultado4bits = toSigned4(resultadoMascarado);
+
+  bool overflow;
+
+  if (isAdd) {
+    overflow = detectOverflowAdd(valA, valB, resultado4bits);
+  } else {
+    overflow = detectOverflowSub(valA, valB, resultado4bits);
+  }
+
+  bool passou = (resultadoCompleto == resultadoCompletoEsperado) &&
+                (resultado4bits == resultado4bitsEsperado) &&
+                (overflow == overflowEsperado);
+
+  Serial.print("> Regressao: ");
+  Serial.print(nome);
+  Serial.print("... ");
+  Serial.println(passou ? "PASS" : "FAIL");
+
+  if (!passou) {
+    Serial.print("  A = ");
+    Serial.print(toBinary4(aRaw));
+    Serial.print(" (");
+    Serial.print(valA);
+    Serial.print(") | B = ");
+    Serial.print(toBinary4(bRaw));
+    Serial.print(" (");
+    Serial.print(valB);
+    Serial.println(")");
+
+    Serial.print("  Resultado completo obtido: ");
+    Serial.print(resultadoCompleto);
+    Serial.print(" | esperado: ");
+    Serial.println(resultadoCompletoEsperado);
+
+    Serial.print("  Resultado 4 bits obtido: ");
+    Serial.print(toBinary4(resultadoMascarado));
+    Serial.print(" (");
+    Serial.print(resultado4bits);
+    Serial.print(") | esperado: ");
+    Serial.println(resultado4bitsEsperado);
+
+    Serial.print("  Overflow obtido: ");
+    Serial.print(overflow ? "true" : "false");
+    Serial.print(" | esperado: ");
+    Serial.println(overflowEsperado ? "true" : "false");
+  }
+
+  return passou;
+}
+
+void runRegressionTests() {
+  Serial.println();
+  Serial.println("============================================");
+  Serial.println("Testes de regressao: adicao e subtracao C2");
+  Serial.println("============================================");
+
+  int total = 0;
+  int aprovados = 0;
+
+  total++;
+  if (runRegressionCase("Soma positiva sem overflow (2+4=6)", "add", 0b0010, 0b0100, 6, 6, false)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Soma negativa sem overflow (-3+1=-2)", "add", 0b1101, 0b0001, -2, -2, false)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Soma com resultado zero (-3+3=0)", "add", 0b1101, 0b0011, 0, 0, false)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Soma com overflow positivo (7+1=8)", "add", 0b0111, 0b0001, 8, -8, true)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Soma com overflow negativo (-8+(-1)=-9)", "add", 0b1000, 0b1111, -9, 7, true)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Subtracao positiva sem overflow (5-2=3)", "sub", 0b0101, 0b0010, 3, 3, false)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Subtracao negativa sem overflow (2-5=-3)", "sub", 0b0010, 0b0101, -3, -3, false)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Subtracao com resultado zero (3-3=0)", "sub", 0b0011, 0b0011, 0, 0, false)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Subtracao com overflow positivo (7-(-1)=8)", "sub", 0b0111, 0b1111, 8, -8, true)) {
+    aprovados++;
+  }
+
+  total++;
+  if (runRegressionCase("Subtracao com overflow negativo (-8-1=-9)", "sub", 0b1000, 0b0001, -9, 7, true)) {
+    aprovados++;
+  }
+
+  Serial.print("> Resultado geral: ");
+  Serial.print(aprovados);
+  Serial.print("/");
+  Serial.print(total);
+  Serial.print(" testes... ");
+  Serial.println((aprovados == total) ? "PASS" : "FAIL");
+  Serial.println("============================================");
+  Serial.println();
 }
 
 // ======================
@@ -381,6 +529,8 @@ void setup() {
   server.begin();
 
   Serial.println("Servidor HTTP iniciado");
+
+  runRegressionTests();
 }
 
 void loop() {
