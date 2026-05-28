@@ -387,6 +387,14 @@ long long executarOperacaoBenchmark(const char* op, int bits, uint32_t aRaw, uin
     return (long long)valA * (long long)valB;
   }
 
+  if (strcmp(op, "div") == 0) {
+    if (valB == 0) {
+      return 0;
+    }
+
+    return (long long)valA / (long long)valB;
+  }
+
   if (strcmp(op, "fat") == 0) {
     if (valA < 0) {
       return 0;
@@ -411,6 +419,9 @@ void getBenchmarkOperands(int bits, const char* op, uint32_t* aRaw, uint32_t* bR
     } else if (strcmp(op, "mul") == 0) {
       *aRaw = 0b0000000001111000; // 120
       *bRaw = 0b0000000000001100; // 12
+    } else if (strcmp(op, "div") == 0) {
+      *aRaw = 0b0000000001100100; // 100
+      *bRaw = 0b0000000000000101; // 5
     } else {
       *aRaw = 0b0000000000001000; // 8, usado em 8!
       *bRaw = 0;
@@ -428,6 +439,9 @@ void getBenchmarkOperands(int bits, const char* op, uint32_t* aRaw, uint32_t* bR
     *bRaw = 0b0011; // 3
   } else if (strcmp(op, "mul") == 0) {
     *aRaw = 0b0011; // 3
+    *bRaw = 0b0010; // 2
+  } else if (strcmp(op, "div") == 0) {
+    *aRaw = 0b0110; // 6
     *bRaw = 0b0010; // 2
   } else {
     *aRaw = 0b0101; // 5, usado em 5!
@@ -452,9 +466,9 @@ String formatFloat(float value, int casas) {
 }
 
 String buildDashboardHtml() {
-  const int totalRows = 8;
-  const char* opCodes[4] = {"add", "sub", "mul", "fat"};
-  const char* opLabels[4] = {"Soma", "Subtracao", "Multiplicacao", "Fatorial"};
+  const int totalRows = 10;
+  const char* opCodes[5] = {"add", "sub", "mul", "div", "fat"};
+  const char* opLabels[5] = {"Soma", "Subtracao", "Multiplicacao", "Divisao", "Fatorial"};
   const int modeBits[2] = {BASE_BITS, EXPANDED_BITS};
   const char* modeLabels[2] = {"4 bits C2", "16 bits C2"};
 
@@ -466,7 +480,7 @@ String buildDashboardHtml() {
   int row = 0;
 
   for (int m = 0; m < 2; m++) {
-    for (int o = 0; o < 4; o++) {
+    for (int o = 0; o < 5; o++) {
       uint32_t aRaw = 0;
       uint32_t bRaw = 0;
       getBenchmarkOperands(modeBits[m], opCodes[o], &aRaw, &bRaw);
@@ -520,7 +534,7 @@ String buildDashboardHtml() {
   row = 0;
 
   for (int m = 0; m < 2; m++) {
-    for (int o = 0; o < 4; o++) {
+    for (int o = 0; o < 5; o++) {
       int barWidth = 0;
 
       if (maiorMedia > 0.0) {
@@ -550,7 +564,7 @@ String buildDashboardHtml() {
 
   html += "</table>";
   html += "</div>";
-  html += "<p class='dash-note'>A tabela compara os modos de 4 bits e 16 bits e tambem compara soma, subtracao, multiplicacao e fatorial. Tempos maiores geram barras mais longas.</p>";
+  html += "<p class='dash-note'>A tabela compara os modos de 4 bits e 16 bits e tambem compara soma, subtracao, multiplicacao, divisao e fatorial. Tempos maiores geram barras mais longas.</p>";
   html += "</div>";
 
   return html;
@@ -576,12 +590,15 @@ String makePage(String a = "0011", String b = "0010", String op = "add", String 
   String checkedAdd = "";
   String checkedSub = "";
   String checkedMul = "";
+  String checkedDiv = "";
   String checkedFat = "";
 
   if (op == "sub") {
     checkedSub = "checked";
   } else if (op == "mul") {
     checkedMul = "checked";
+  } else if (op == "div") {
+    checkedDiv = "checked";
   } else if (op == "fat") {
     checkedFat = "checked";
   } else {
@@ -653,6 +670,7 @@ String makePage(String a = "0011", String b = "0010", String op = "add", String 
   html += "<label><input type='radio' name='op' value='add' " + checkedAdd + " onchange='toggleMode()'> Soma</label>";
   html += "<label><input type='radio' name='op' value='sub' " + checkedSub + " onchange='toggleMode()'> Subtração</label>";
   html += "<label><input type='radio' name='op' value='mul' " + checkedMul + " onchange='toggleMode()'> Multiplicação</label>";
+  html += "<label><input type='radio' name='op' value='div' " + checkedDiv + " onchange='toggleMode()'> Divisão</label>";
   html += "<label><input type='radio' name='op' value='fat' " + checkedFat + " onchange='toggleMode()'> Fatorial de A</label>";
   html += "</div>";
 
@@ -669,11 +687,11 @@ String makePage(String a = "0011", String b = "0010", String op = "add", String 
 
   html += "<div class='small' id='infoModo'>";
   if (mode == "16") {
-    html += "<p>Modo expandido: 16 bits em complemento de dois. Faixa assinada: -32768 até +32767. Valor bruto máximo: 65535.</p>";
+    html += "<p>Modo expandido: 16 bits em complemento de dois. Faixa com sinal: -32768 até +32767. Valor bruto máximo: 65535.</p>";
   } else {
-    html += "<p>Modo original: 4 bits em complemento de dois. Faixa assinada: -8 até +7. Valor bruto máximo: 15.</p>";
+    html += "<p>Modo original: 4 bits em complemento de dois. Valor bruto máximo: 15.</p>";
   }
-  html += "<p>No modo fatorial, apenas o operando A é usado.</p>";
+  html += "<p>No modo fatorial, apenas o operando A é usado. Na divisão, o operando B não pode ser zero.</p>";
   html += "<p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>";
   html += "</div>";
 
@@ -701,8 +719,8 @@ String makePage(String a = "0011", String b = "0010", String op = "add", String 
   html += "  if(fat){campoB.style.display='none'; inputB.required=false;}";
   html += "  else{campoB.style.display='block'; inputB.required=true;}";
   html += "  var info = document.getElementById('infoModo');";
-  html += "  if(bits === 16){info.innerHTML = '<p>Modo expandido: 16 bits em complemento de dois. Faixa assinada: -32768 até +32767. Valor bruto máximo: 65535.</p><p>No modo fatorial, apenas o operando A é usado.</p><p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>';}";
-  html += "  else{info.innerHTML = '<p>Modo original: 4 bits em complemento de dois. Faixa assinada: -8 até +7. Valor bruto máximo: 15.</p><p>No modo fatorial, apenas o operando A é usado.</p><p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>';}";
+  html += "  if(bits === 16){info.innerHTML = '<p>Modo expandido: 16 bits em complemento de dois. Faixa com sinal: -32768 até +32767. Valor bruto máximo: 65535.</p><p>No modo fatorial, apenas o operando A é usado. Na divisão, o operando B não pode ser zero.</p><p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>';}";
+  html += "  else{info.innerHTML = '<p>Modo original: 4 bits em complemento de dois.Valor bruto máximo: 15.</p><p>No modo fatorial, apenas o operando A é usado. Na divisão, o operando B não pode ser zero.</p><p>GPIO4 = bit3, GPIO5 = bit2, GPIO6 = bit1, GPIO7 = bit0. No modo expandido, os LEDs mostram os 4 bits menos significativos.</p>';}";
   html += "}";
   html += "window.onload = toggleMode;";
   html += "</script>";
@@ -733,7 +751,7 @@ void handleCalc() {
 
   int bits = (mode == "16") ? EXPANDED_BITS : BASE_BITS;
 
-  if (op != "add" && op != "sub" && op != "mul" && op != "fat") {
+  if (op != "add" && op != "sub" && op != "mul" && op != "div" && op != "fat") {
     op = "add";
   }
 
@@ -762,6 +780,12 @@ void handleCalc() {
   int32_t valA = toSignedBits(valA_raw, bits);
   int32_t valB = toSignedBits(valB_raw, bits);
 
+  if (op == "div" && valB == 0) {
+    updateOutputLeds(0);
+    server.send(400, "text/html", makePage(paramA, paramB, op, mode, "----", "--", "Erro: divisão por zero", true));
+    return;
+  }
+
   int32_t limiteMin = minSignedValue(bits);
   int32_t limiteMax = maxSignedValue(bits);
 
@@ -776,6 +800,8 @@ void handleCalc() {
     resultadoCompleto = (long long)valA - (long long)valB;
   } else if (op == "mul") {
     resultadoCompleto = (long long)valA * (long long)valB;
+  } else if (op == "div") {
+    resultadoCompleto = (long long)valA / (long long)valB;
   } else if (op == "fat") {
     if (valA < 0) {
       erroFatorialNegativo = true;
