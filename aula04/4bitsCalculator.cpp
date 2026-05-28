@@ -43,8 +43,8 @@ Adafruit_NeoPixel onboardLed(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800)
  
 // Calcula fatorial 
   int fatorial(int n){
-    if(n < 0){
-      return 0; // erro
+    if(n <= 1){
+      return 1; 
     }
 
     int resultado = 1;
