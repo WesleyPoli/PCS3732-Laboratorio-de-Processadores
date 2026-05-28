@@ -39,6 +39,21 @@ Adafruit_NeoPixel onboardLed(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800)
 // ======================
 // Funções auxiliares
 // ======================
+ 
+// Calcula fatorial 
+  int fatorial(int n){
+    if(n < 0){
+      return 0; // erro
+    }
+
+    int resultado = 1;
+
+    for(int i = 2; i <= n; i++){
+      resultado *= i;
+    }
+
+    return resultado;
+  }
 
 bool isBinary4(String value) {
   if (value.length() != 4) {
@@ -91,13 +106,13 @@ void updateOutputLeds(int resultado) {
   digitalWrite(LED_BIT3, resultado & 0x08);
 }
 
-void setStatusLed(bool overflow, int resultadoAssinado) {
+void setStatusLed(bool overflow, int resultadoCompleto) {
   if (overflow) {
     // Overflow tem prioridade sobre positivo, negativo ou zero
     onboardLed.setPixelColor(0, onboardLed.Color(80, 80, 0)); // amarelo
-  } else if (resultadoAssinado == 0) {
+  } else if (resultadoCompleto == 0) {
     onboardLed.setPixelColor(0, onboardLed.Color(0, 0, 80)); // azul
-  } else if (resultadoAssinado > 0) {
+  } else if (resultadoCompleto > 0) {
     onboardLed.setPixelColor(0, onboardLed.Color(0, 80, 0)); // verde
   } else {
     onboardLed.setPixelColor(0, onboardLed.Color(80, 0, 0)); // vermelho
@@ -106,18 +121,18 @@ void setStatusLed(bool overflow, int resultadoAssinado) {
   onboardLed.show();
 }
 
-bool detectOverflowAdd(int valA, int valB, int resultadoAssinado) {
+bool detectOverflowAdd(int valA, int valB, int resultadoCompleto) {
   bool aPositive = valA >= 0;
   bool bPositive = valB >= 0;
-  bool resultPositive = resultadoAssinado >= 0;
+  bool resultPositive = resultadoCompleto >= 0;
 
   return (aPositive == bPositive) && (resultPositive != aPositive);
 }
 
-bool detectOverflowSub(int valA, int valB, int resultadoAssinado) {
+bool detectOverflowSub(int valA, int valB, int resultadoCompleto) {
   bool aPositive = valA >= 0;
   bool bPositive = valB >= 0;
-  bool resultPositive = resultadoAssinado >= 0;
+  bool resultPositive = resultadoCompleto >= 0;
 
   return (aPositive != bPositive) && (resultPositive != aPositive);
 }
@@ -132,12 +147,20 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
 
   String checkedAdd = "";
   String checkedSub = "";
+  String checkedMul = "";
+  String checkedFat = "";
 
-  if (op == "sub") {
-    checkedSub = "checked";
+  if (op == "add") {
+  checkedAdd = "checked";
+  } else if (op == "sub") {
+  checkedSub = "checked";
+  } else if (op == "mul") {
+  checkedMul = "checked";
+  } else if (op == "fat") {
+  checkedFat = "checked";
   } else {
-    checkedAdd = "checked";
-  }
+  checkedAdd = "checked";
+    }
 
   String statusClass = overflow ? "overflow" : "ok";
 
@@ -181,6 +204,8 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   html += "<div class='ops'>";
   html += "<label><input type='radio' name='op' value='add' " + checkedAdd + "> Soma</label>";
   html += "<label><input type='radio' name='op' value='sub' " + checkedSub + "> Subtração</label>";
+  html += "<label><input type='radio' name='op' value='mul' " + checkedMul + "> Multiplicação</label>";
+  html += "<label><input type='radio' name='op' value='fat' " + checkedFat + "> Fatorial de A</label>";
   html += "</div>";
 
   html += "<button type='submit'>Calcular</button>";
@@ -222,7 +247,7 @@ void handleCalc() {
     return;
   }
 
-  if (op != "add" && op != "sub") {
+  if (op != "add" && op != "sub" && op != "mul" && op != "fat") {
     op = "add";
   }
 
@@ -235,31 +260,38 @@ void handleCalc() {
   int valB = toSigned4(valB_raw);
 
   // 2. Operação Aritmética em C nativo
-  int resultadoCompleto = (op == "add") ? (valA + valB) : (valA - valB);
+  int resultadoCompleto = (op == "add") ? (valA + valB) 
+                        : (op == "mul") ? (valA * valB) 
+                        : (op == "fat") ? (fatorial(valA)) 
+                        : (op == "sub") ? (valA - valB) 
+                        : 0;
 
   // 3. Mascaramento, garantindo 4 bits
   int resultado = resultadoCompleto & 0x0F;
 
   // Complemento de dois: resultado assinado de 4 bits
-  int resultadoAssinado = toSigned4(resultado);
+  int resultadoCompleto = toSigned4(resultado);
 
   // Detecção de overflow
-  bool overflow;
+  bool overflow = false;
 
   if (op == "add") {
-    overflow = detectOverflowAdd(valA, valB, resultadoAssinado);
-  } else {
-    overflow = detectOverflowSub(valA, valB, resultadoAssinado);
+  overflow = detectOverflowAdd(valA, valB, resultadoCompleto);
+  } else if (op == "sub") {
+  overflow = detectOverflowSub(valA, valB, resultadoCompleto);
+  } else if (op == "mul" || op == "fat") {
+  // Para essas duas operações basta apenas verificar o resultado 
+  overflow = (resultadoCompleto < -8 || resultadoCompleto > 7);
   }
 
   // 4. Output para GPIO
   updateOutputLeds(resultado);
 
   // LED onboard indica status
-  setStatusLed(overflow, resultadoAssinado);
+  setStatusLed(overflow, resultadoCompleto);
 
   String resultBin = toBinary4(resultado);
-  String resultDec = String(resultadoAssinado);
+  String resultDec = String(resultadoCompleto);
 
   String status;
 
