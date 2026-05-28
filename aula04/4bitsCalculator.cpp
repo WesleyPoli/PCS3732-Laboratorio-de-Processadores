@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <math.h>
 
 // ======================
 // Configuração Wi-Fi AP
@@ -22,6 +23,15 @@ WebServer server(80);
 
 #define BASE_BITS 4
 #define EXPANDED_BITS 16
+
+// ======================
+// Dashboard de desempenho
+// ======================
+
+#define PERF_SAMPLES 5
+#define PERF_REPETITIONS 5000
+
+volatile uint32_t perfSink = 0;
 
 // ======================
 // NeoPixel onboard
@@ -355,6 +365,197 @@ void runRegressionTests() {
   Serial.println();
 }
 
+
+// ======================
+// Dashboard de desempenho
+// ======================
+
+long long executarOperacaoBenchmark(const char* op, int bits, uint32_t aRaw, uint32_t bRaw) {
+  int32_t valA = toSignedBits(aRaw, bits);
+  int32_t valB = toSignedBits(bRaw, bits);
+  int32_t limiteMax = maxSignedValue(bits);
+
+  if (strcmp(op, "add") == 0) {
+    return (long long)valA + (long long)valB;
+  }
+
+  if (strcmp(op, "sub") == 0) {
+    return (long long)valA - (long long)valB;
+  }
+
+  if (strcmp(op, "mul") == 0) {
+    return (long long)valA * (long long)valB;
+  }
+
+  if (strcmp(op, "fat") == 0) {
+    if (valA < 0) {
+      return 0;
+    }
+
+    bool overflowFatorial = false;
+    return fatorialLimitado((int)valA, limiteMax, &overflowFatorial);
+  }
+
+  return 0;
+}
+
+void getBenchmarkOperands(int bits, const char* op, uint32_t* aRaw, uint32_t* bRaw) {
+  if (bits == EXPANDED_BITS) {
+    // Valores representativos para o modo expandido de 16 bits.
+    if (strcmp(op, "add") == 0) {
+      *aRaw = 0b0000101110111000; // 3000
+      *bRaw = 0b0000010010110000; // 1200
+    } else if (strcmp(op, "sub") == 0) {
+      *aRaw = 0b0001001110001000; // 5000
+      *bRaw = 0b0000010011010010; // 1234
+    } else if (strcmp(op, "mul") == 0) {
+      *aRaw = 0b0000000001111000; // 120
+      *bRaw = 0b0000000000001100; // 12
+    } else {
+      *aRaw = 0b0000000000001000; // 8, usado em 8!
+      *bRaw = 0;
+    }
+
+    return;
+  }
+
+  // Valores representativos para o modo original de 4 bits com sinal.
+  if (strcmp(op, "add") == 0) {
+    *aRaw = 0b0011; // 3
+    *bRaw = 0b0010; // 2
+  } else if (strcmp(op, "sub") == 0) {
+    *aRaw = 0b0101; // 5
+    *bRaw = 0b0011; // 3
+  } else if (strcmp(op, "mul") == 0) {
+    *aRaw = 0b0011; // 3
+    *bRaw = 0b0010; // 2
+  } else {
+    *aRaw = 0b0101; // 5, usado em 5!
+    *bRaw = 0;
+  }
+}
+
+unsigned long medirTempoLoteUs(const char* op, int bits, uint32_t aRaw, uint32_t bRaw) {
+  unsigned long inicio = micros();
+
+  for (int i = 0; i < PERF_REPETITIONS; i++) {
+    long long resultado = executarOperacaoBenchmark(op, bits, aRaw, bRaw);
+    perfSink ^= (uint32_t)resultado;
+  }
+
+  unsigned long fim = micros();
+  return fim - inicio;
+}
+
+String formatFloat(float value, int casas) {
+  return String(value, casas);
+}
+
+String buildDashboardHtml() {
+  const int totalRows = 8;
+  const char* opCodes[4] = {"add", "sub", "mul", "fat"};
+  const char* opLabels[4] = {"Soma", "Subtracao", "Multiplicacao", "Fatorial"};
+  const int modeBits[2] = {BASE_BITS, EXPANDED_BITS};
+  const char* modeLabels[2] = {"4 bits C2", "16 bits C2"};
+
+  unsigned long tempos[totalRows][PERF_SAMPLES];
+  float medias[totalRows];
+  float desvios[totalRows];
+  float maiorMedia = 0.0;
+
+  int row = 0;
+
+  for (int m = 0; m < 2; m++) {
+    for (int o = 0; o < 4; o++) {
+      uint32_t aRaw = 0;
+      uint32_t bRaw = 0;
+      getBenchmarkOperands(modeBits[m], opCodes[o], &aRaw, &bRaw);
+
+      float soma = 0.0;
+
+      for (int s = 0; s < PERF_SAMPLES; s++) {
+        tempos[row][s] = medirTempoLoteUs(opCodes[o], modeBits[m], aRaw, bRaw);
+        soma += (float)tempos[row][s];
+      }
+
+      medias[row] = soma / PERF_SAMPLES;
+
+      float somaQuadrados = 0.0;
+
+      for (int s = 0; s < PERF_SAMPLES; s++) {
+        float diferenca = (float)tempos[row][s] - medias[row];
+        somaQuadrados += diferenca * diferenca;
+      }
+
+      desvios[row] = sqrt(somaQuadrados / PERF_SAMPLES);
+
+      if (medias[row] > maiorMedia) {
+        maiorMedia = medias[row];
+      }
+
+      row++;
+    }
+  }
+
+  String html = "";
+
+  html += "<div class='dashboard'>";
+  html += "<h2>Dashboard de desempenho</h2>";
+  html += "<p class='dash-note'>Cada amostra executa " + String(PERF_REPETITIONS) + " repeticoes da mesma operacao e mede o tempo total do lote em microssegundos. Isso evita que uma unica operacao apareca como 0 us por ser rapida demais.</p>";
+  html += "<div class='table-wrap'>";
+  html += "<table>";
+  html += "<tr>";
+  html += "<th>Modo</th>";
+  html += "<th>Operacao</th>";
+
+  for (int s = 0; s < PERF_SAMPLES; s++) {
+    html += "<th>t" + String(s + 1) + " (us)</th>";
+  }
+
+  html += "<th>Media (us)</th>";
+  html += "<th>Desvio padrao</th>";
+  html += "<th>Comparacao</th>";
+  html += "</tr>";
+
+  row = 0;
+
+  for (int m = 0; m < 2; m++) {
+    for (int o = 0; o < 4; o++) {
+      int barWidth = 0;
+
+      if (maiorMedia > 0.0) {
+        barWidth = (int)((medias[row] / maiorMedia) * 100.0);
+      }
+
+      if (barWidth < 3) {
+        barWidth = 3;
+      }
+
+      html += "<tr>";
+      html += "<td>" + String(modeLabels[m]) + "</td>";
+      html += "<td>" + String(opLabels[o]) + "</td>";
+
+      for (int s = 0; s < PERF_SAMPLES; s++) {
+        html += "<td>" + String(tempos[row][s]) + "</td>";
+      }
+
+      html += "<td><strong>" + formatFloat(medias[row], 1) + "</strong></td>";
+      html += "<td>" + formatFloat(desvios[row], 1) + "</td>";
+      html += "<td><div class='bar-bg'><div class='bar-fill' style='width:" + String(barWidth) + "%'></div></div></td>";
+      html += "</tr>";
+
+      row++;
+    }
+  }
+
+  html += "</table>";
+  html += "</div>";
+  html += "<p class='dash-note'>A tabela compara os modos de 4 bits e 16 bits e tambem compara soma, subtracao, multiplicacao e fatorial. Tempos maiores geram barras mais longas.</p>";
+  html += "</div>";
+
+  return html;
+}
+
 // ======================
 // Página HTML
 // ======================
@@ -412,6 +613,15 @@ String makePage(String a = "0011", String b = "0010", String op = "add", String 
   html += ".overflow{color:#d00000;font-weight:bold;}";
   html += ".small{font-size:14px;color:#666;margin-top:20px;line-height:1.4;}";
   html += ".card{border:1px solid #d7e2ee;border-radius:10px;padding:12px;margin-top:12px;background:#fafcff;}";
+  html += ".dashboard{margin-top:22px;padding:14px;border:1px solid #d7e2ee;border-radius:10px;background:#fafcff;}";
+  html += ".dashboard h2{text-align:center;margin:0 0 10px 0;font-size:22px;}";
+  html += ".dash-note{font-size:13px;color:#555;line-height:1.35;}";
+  html += ".table-wrap{overflow-x:auto;margin-top:10px;}";
+  html += "table{width:100%;border-collapse:collapse;font-size:13px;background:white;}";
+  html += "th,td{border:1px solid #c8d3df;padding:8px;text-align:center;white-space:nowrap;}";
+  html += "th{background:#eaf2fb;}";
+  html += ".bar-bg{width:100px;height:12px;border-radius:6px;background:#e1e8f0;margin:auto;overflow:hidden;}";
+  html += ".bar-fill{height:12px;border-radius:6px;background:#1e88e5;}";
   html += "</style>";
 
   html += "</head>";
@@ -454,6 +664,8 @@ String makePage(String a = "0011", String b = "0010", String op = "add", String 
   html += "<p><strong>Resultado decimal:</strong> " + resultDec + "</p>";
   html += "<p><strong>Status:</strong> <span class='" + statusClass + "'>" + status + "</span></p>";
   html += "</div>";
+
+  html += buildDashboardHtml();
 
   html += "<div class='small' id='infoModo'>";
   if (mode == "16") {
