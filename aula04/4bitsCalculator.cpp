@@ -7,7 +7,7 @@
 // Configuração Wi-Fi AP
 // ======================
 
-const char* ssid = "Calculadora_ESP32_m";
+const char* ssid = "Calculadora_GrupoC";
 const char* password = "12345678";
 
 // Servidor HTTP na porta 80
@@ -107,13 +107,16 @@ void updateOutputLeds(int resultado) {
   digitalWrite(LED_BIT3, resultado & 0x08);
 }
 
-void setStatusLed(bool overflow, int resultadoCompleto) {
+void setStatusLed(bool overflow, int resultado4bits
+) {
   if (overflow) {
     // Overflow tem prioridade sobre positivo, negativo ou zero
     onboardLed.setPixelColor(0, onboardLed.Color(80, 80, 0)); // amarelo
-  } else if (resultadoCompleto == 0) {
+  } else if (resultado4bits
+     == 0) {
     onboardLed.setPixelColor(0, onboardLed.Color(0, 0, 80)); // azul
-  } else if (resultadoCompleto > 0) {
+  } else if (resultado4bits
+     > 0) {
     onboardLed.setPixelColor(0, onboardLed.Color(0, 80, 0)); // verde
   } else {
     onboardLed.setPixelColor(0, onboardLed.Color(80, 0, 0)); // vermelho
@@ -122,18 +125,22 @@ void setStatusLed(bool overflow, int resultadoCompleto) {
   onboardLed.show();
 }
 
-bool detectOverflowAdd(int valA, int valB, int resultadoCompleto) {
+bool detectOverflowAdd(int valA, int valB, int resultado4bits
+) {
   bool aPositive = valA >= 0;
   bool bPositive = valB >= 0;
-  bool resultPositive = resultadoCompleto >= 0;
+  bool resultPositive = resultado4bits
+   >= 0;
 
   return (aPositive == bPositive) && (resultPositive != aPositive);
 }
 
-bool detectOverflowSub(int valA, int valB, int resultadoCompleto) {
+bool detectOverflowSub(int valA, int valB, int resultado4bits
+) {
   bool aPositive = valA >= 0;
   bool bPositive = valB >= 0;
-  bool resultPositive = resultadoCompleto >= 0;
+  bool resultPositive = resultado4bits
+   >= 0;
 
   return (aPositive != bPositive) && (resultPositive != aPositive);
 }
@@ -151,17 +158,15 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   String checkedMul = "";
   String checkedFat = "";
 
-  if (op == "add") {
-  checkedAdd = "checked";
-  } else if (op == "sub") {
-  checkedSub = "checked";
+  if (op == "sub") {
+    checkedSub = "checked";
   } else if (op == "mul") {
-  checkedMul = "checked";
+    checkedMul = "checked";
   } else if (op == "fat") {
-  checkedFat = "checked";
+    checkedFat = "checked";
   } else {
-  checkedAdd = "checked";
-    }
+    checkedAdd = "checked";
+  }
 
   String statusClass = overflow ? "overflow" : "ok";
 
@@ -172,7 +177,7 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   html += "<head>";
   html += "<meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-  html += "<title>Calculadora ESP32 m</title>";
+  html += "<title>Calculadora ESP32</title>";
 
   html += "<style>";
   html += "body{font-family:Arial;background:#f4f6f8;margin:0;padding:20px;color:#222;}";
@@ -199,14 +204,16 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   html += "<label>Operando A - 4 bits</label>";
   html += "<input type='text' name='a' maxlength='4' value='" + a + "' pattern='[01]{4}' required>";
 
+  html += "<div id='campoB'>";
   html += "<label>Operando B - 4 bits</label>";
-  html += "<input type='text' name='b' maxlength='4' value='" + b + "' pattern='[01]{4}' required>";
+  html += "<input id='inputB' type='text' name='b' maxlength='4' value='" + b + "' pattern='[01]{4}' required>";
+  html += "</div>";
 
   html += "<div class='ops'>";
-  html += "<label><input type='radio' name='op' value='add' " + checkedAdd + "> Soma</label>";
-  html += "<label><input type='radio' name='op' value='sub' " + checkedSub + "> Subtração</label>";
-  html += "<label><input type='radio' name='op' value='mul' " + checkedMul + "> Multiplicação</label>";
-  html += "<label><input type='radio' name='op' value='fat' " + checkedFat + "> Fatorial de A</label>";
+  html += "<label><input type='radio' name='op' value='add' " + checkedAdd + " onchange='toggleB()'> Soma</label>";
+  html += "<label><input type='radio' name='op' value='sub' " + checkedSub + " onchange='toggleB()'> Subtração</label>";
+  html += "<label><input type='radio' name='op' value='mul' " + checkedMul + " onchange='toggleB()'> Multiplicação</label>";
+  html += "<label><input type='radio' name='op' value='fat' " + checkedFat + " onchange='toggleB()'> Fatorial de A</label>";
   html += "</div>";
 
   html += "<button type='submit'>Calcular</button>";
@@ -224,6 +231,23 @@ String makePage(String a = "0011", String b = "0010", String op = "add",
   html += "</div>";
 
   html += "</div>";
+
+  html += "<script>";
+  html += "function toggleB(){";
+  html += "  var fat = document.querySelector(\"input[name='op'][value='fat']\").checked;";
+  html += "  var campoB = document.getElementById('campoB');";
+  html += "  var inputB = document.getElementById('inputB');";
+  html += "  if(fat){";
+  html += "    campoB.style.display = 'none';";
+  html += "    inputB.required = false;";
+  html += "  } else {";
+  html += "    campoB.style.display = 'block';";
+  html += "    inputB.required = true;";
+  html += "  }";
+  html += "}";
+  html += "window.onload = toggleB;";
+  html += "</script>";
+
   html += "</body>";
   html += "</html>";
 
@@ -243,16 +267,26 @@ void handleCalc() {
   String paramB = server.arg("b");
   String op = server.arg("op");
 
-  if (!isBinary4(paramA) || !isBinary4(paramB)) {
-    server.send(400, "text/html", makePage(paramA, paramB, op, "----", "--", "Erro: use exatamente 4 bits em A e B", true));
-    return;
-  }
-
   if (op != "add" && op != "sub" && op != "mul" && op != "fat") {
     op = "add";
   }
 
-  // 1. Parsing: String para Inteiro
+  if (op == "fat") {
+    if (!isBinary4(paramA)) {
+      server.send(400, "text/html", makePage(paramA, paramB, op, "----", "--", "Erro: use exatamente 4 bits em A", true));
+      return;
+    }
+
+    // No fatorial, o operando B não é usado.
+    paramB = "0000";
+  } else {
+    if (!isBinary4(paramA) || !isBinary4(paramB)) {
+      server.send(400, "text/html", makePage(paramA, paramB, op, "----", "--", "Erro: use exatamente 4 bits em A e B", true));
+      return;
+    }
+  }
+
+  // 1. Parsing: string binária para inteiro
   int valA_raw = strtol(paramA.c_str(), NULL, 2);
   int valB_raw = strtol(paramB.c_str(), NULL, 2);
 
@@ -260,28 +294,31 @@ void handleCalc() {
   int valA = toSigned4(valA_raw);
   int valB = toSigned4(valB_raw);
 
-  // 2. Operação Aritmética em C nativo
-  int resultadoCompleto = (op == "add") ? (valA + valB) 
-                      : (op == "mul") ? (valA * valB) 
-                      : (op == "fat") ? (fatorial(valA)) 
-                      : (op == "sub") ? (valA - valB) 
-                      : 0;
+  // 2. Operação aritmética em C++ nativo
+  int resultadoCompleto = (op == "add") ? (valA + valB)
+                        : (op == "sub") ? (valA - valB)
+                        : (op == "mul") ? (valA * valB)
+                        : (op == "fat") ? fatorial(valA)
+                        : 0;
 
   // 3. Mascaramento, garantindo 4 bits
   int resultado = resultadoCompleto & 0x0F;
 
-  // Complemento de dois: resultado com sinal de 4 bits
-  int resultado4bits = toSigned4(resultado);
+  // Complemento de dois: resultado assinado de 4 bits
+  int resultado4bits
+   = toSigned4(resultado);
 
   // Detecção de overflow
   bool overflow = false;
 
   if (op == "add") {
-    overflow = detectOverflowAdd(valA, valB, resultado4bits);
+    overflow = detectOverflowAdd(valA, valB, resultado4bits
+    );
   } else if (op == "sub") {
-    overflow = detectOverflowSub(valA, valB, resultado4bits);
+    overflow = detectOverflowSub(valA, valB, resultado4bits
+    );
   } else if (op == "mul" || op == "fat") {
-    // Para multiplicação e fatorial, verifica o resultado completo antes do mascaramento
+    // Em 4 bits com sinal, a faixa representável é de -8 até +7.
     overflow = (resultadoCompleto < -8 || resultadoCompleto > 7);
   }
 
@@ -289,10 +326,12 @@ void handleCalc() {
   updateOutputLeds(resultado);
 
   // LED onboard indica status
-  setStatusLed(overflow, resultado4bits);
+  setStatusLed(overflow, resultado4bits
+  );
 
   String resultBin = toBinary4(resultado);
-  String resultDec = String(resultado4bits);
+  String resultDec = String(resultado4bits
+  );
 
   String status;
 
