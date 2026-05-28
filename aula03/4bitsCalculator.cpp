@@ -1,3 +1,4 @@
+// Após conectar na rede wi-fi, acessar o front pelo IP 192.168.4.1
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Adafruit_NeoPixel.h>

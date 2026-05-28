@@ -1,3 +1,4 @@
+// Após conectar na rede wi-fi, acessar o front pelo IP 192.168.4.1
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Adafruit_NeoPixel.h>
@@ -261,37 +262,37 @@ void handleCalc() {
 
   // 2. Operação Aritmética em C nativo
   int resultadoCompleto = (op == "add") ? (valA + valB) 
-                        : (op == "mul") ? (valA * valB) 
-                        : (op == "fat") ? (fatorial(valA)) 
-                        : (op == "sub") ? (valA - valB) 
-                        : 0;
+                      : (op == "mul") ? (valA * valB) 
+                      : (op == "fat") ? (fatorial(valA)) 
+                      : (op == "sub") ? (valA - valB) 
+                      : 0;
 
   // 3. Mascaramento, garantindo 4 bits
   int resultado = resultadoCompleto & 0x0F;
 
-  // Complemento de dois: resultado assinado de 4 bits
-  int resultadoCompleto = toSigned4(resultado);
+  // Complemento de dois: resultado com sinal de 4 bits
+  int resultado4bits = toSigned4(resultado);
 
   // Detecção de overflow
   bool overflow = false;
 
   if (op == "add") {
-  overflow = detectOverflowAdd(valA, valB, resultadoCompleto);
+    overflow = detectOverflowAdd(valA, valB, resultado4bits);
   } else if (op == "sub") {
-  overflow = detectOverflowSub(valA, valB, resultadoCompleto);
+    overflow = detectOverflowSub(valA, valB, resultado4bits);
   } else if (op == "mul" || op == "fat") {
-  // Para essas duas operações basta apenas verificar o resultado 
-  overflow = (resultadoCompleto < -8 || resultadoCompleto > 7);
+    // Para multiplicação e fatorial, verifica o resultado completo antes do mascaramento
+    overflow = (resultadoCompleto < -8 || resultadoCompleto > 7);
   }
 
   // 4. Output para GPIO
   updateOutputLeds(resultado);
 
   // LED onboard indica status
-  setStatusLed(overflow, resultadoCompleto);
+  setStatusLed(overflow, resultado4bits);
 
   String resultBin = toBinary4(resultado);
-  String resultDec = String(resultadoCompleto);
+  String resultDec = String(resultado4bits);
 
   String status;
 
