@@ -30,18 +30,14 @@ WebServer server(80);
 Adafruit_NeoPixel onboardLed(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
 // ======================
-// Pinos do projeto PWM
+// Pinagem
 // ======================
 //
 // LED_PWM_PIN:
-// Usei GPIO7 para aproveitar um dos LEDs externos do seu código anterior.
+// O GPIO7 é usado para alimentar o LED externo.
 //
 // SERVO_PWM_PIN:
-// Usei GPIO3 para o sinal PWM do servo.
-//
-// Atenção:
-// Não use GPIO8, pois ele já está ligado ao NeoPixel onboard no seu código.
-// Evite GPIO20 e GPIO21, pois costumam estar ligados ao USB no ESP32-C3.
+// O GPIO3 é usado para o sinal PWM do servo.
 
 #define LED_PWM_PIN 7
 #define SERVO_PWM_PIN 3
