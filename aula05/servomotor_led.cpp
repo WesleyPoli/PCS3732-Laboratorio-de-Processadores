@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Adafruit_NeoPixel.h>
+#include <ESP32Servo.h>
 
 #if __has_include(<esp_arduino_version.h>)
   #include <esp_arduino_version.h>
@@ -34,32 +35,36 @@ Adafruit_NeoPixel onboardLed(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800)
 // ======================
 //
 // LED_PWM_PIN:
-// O GPIO7 é usado para alimentar o LED externo.
+// GPIO7 controla o brilho do LED externo.
 //
 // SERVO_PWM_PIN:
-// O GPIO3 é usado para o sinal PWM do servo.
+// GPIO4 controla o sinal do servo, igual ao código que funcionou.
 
 #define LED_PWM_PIN 7
-#define SERVO_PWM_PIN 3
+#define SERVO_PWM_PIN 4
 
 // ======================
-// Canais e frequências PWM
+// PWM do LED
 // ======================
-//
-// LED: frequência alta para evitar flicker.
-// Servo: 50 Hz, período de 20 ms.
 
-#define LED_PWM_CHANNEL 0
-#define SERVO_PWM_CHANNEL 1
-
+#define LED_PWM_CHANNEL 4
 #define LED_PWM_FREQ 5000
 #define LED_PWM_RESOLUTION 8
 
-#define SERVO_PWM_FREQ 50
-#define SERVO_PWM_RESOLUTION 16
+// ======================
+// Servo com ESP32Servo
+// ======================
+//
+// Ajustado para seguir o código que funcionou:
+// 50 Hz
+// attach com 500 us a 2400 us
+// controle por write(angle)
 
-#define SERVO_MIN_US 1000
-#define SERVO_MAX_US 2000
+#define SERVO_PWM_FREQ 50
+#define SERVO_MIN_US 500
+#define SERVO_MAX_US 2400
+
+Servo servoMotor;
 
 // ======================
 // Estados atuais
@@ -69,7 +74,7 @@ int ledPercent = 0;
 int servoAngle = 90;
 
 // ======================
-// Funções auxiliares PWM
+// Funções auxiliares LED PWM
 // ======================
 
 uint32_t maxDuty(uint8_t resolutionBits) {
@@ -108,30 +113,17 @@ void setLedBrightness(int percent) {
   writePwmChannel(LED_PWM_CHANNEL, duty);
 }
 
-uint32_t servoAngleToDuty(int angle) {
-  angle = constrain(angle, 0, 180);
-
-  int pulseUs = map(
-    angle,
-    0,
-    180,
-    SERVO_MIN_US,
-    SERVO_MAX_US
-  );
-
-  uint32_t periodUs = 1000000UL / SERVO_PWM_FREQ;
-
-  uint32_t duty = ((uint64_t)pulseUs * maxDuty(SERVO_PWM_RESOLUTION)) / periodUs;
-
-  return duty;
-}
+// ======================
+// Funções auxiliares Servo
+// ======================
 
 void setServoAngle(int angle) {
   servoAngle = constrain(angle, 0, 180);
 
-  uint32_t duty = servoAngleToDuty(servoAngle);
+  servoMotor.write(servoAngle);
 
-  writePwmChannel(SERVO_PWM_CHANNEL, duty);
+  Serial.print("Servo angle: ");
+  Serial.println(servoAngle);
 }
 
 void setOnboardStatus(uint8_t r, uint8_t g, uint8_t b) {
@@ -291,8 +283,8 @@ String makePage() {
 
     <div class="small">
       <p><strong>LED PWM:</strong> GPIO{{LED_PIN}}, 5 kHz, duty cycle de 0 a 100%.</p>
-      <p><strong>Servo PWM:</strong> GPIO{{SERVO_PIN}}, 50 Hz, pulsos de 1,0 ms a 2,0 ms.</p>
-      <p>O PWM é gerado por hardware, então o ESP32 continua atendendo a interface web enquanto os periféricos permanecem ativos.</p>
+      <p><strong>Servo:</strong> GPIO{{SERVO_PIN}}, 50 Hz, controle por ESP32Servo.</p>
+      <p>O LED usa PWM de hardware por LEDC e o servo usa a biblioteca ESP32Servo.</p>
     </div>
   </div>
 
@@ -329,7 +321,7 @@ String makePage() {
           .catch(error => {
             statusBox.textContent = "Erro ao enviar comando para o ESP32";
           });
-      }, 60);
+      }, 120);
     }
 
     function setServoPreset(angle) {
@@ -378,6 +370,7 @@ void handleSet() {
   json += "}";
 
   server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("Connection", "close");
   server.send(200, "application/json", json);
 }
 
@@ -396,6 +389,17 @@ void setup() {
   onboardLed.setBrightness(25);
   setOnboardStatus(0, 0, 80);
 
+  // Configuração dos timers da ESP32Servo,
+  // igual ao código que funcionou.
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  servoMotor.setPeriodHertz(SERVO_PWM_FREQ);
+  servoMotor.attach(SERVO_PWM_PIN, SERVO_MIN_US, SERVO_MAX_US);
+  servoMotor.write(servoAngle);
+
   bool ledOk = attachPwmChannel(
     LED_PWM_PIN,
     LED_PWM_CHANNEL,
@@ -403,18 +407,13 @@ void setup() {
     LED_PWM_RESOLUTION
   );
 
-  bool servoOk = attachPwmChannel(
-    SERVO_PWM_PIN,
-    SERVO_PWM_CHANNEL,
-    SERVO_PWM_FREQ,
-    SERVO_PWM_RESOLUTION
-  );
+  bool servoOk = servoMotor.attached();
 
   if (!ledOk || !servoOk) {
-    Serial.println("Erro ao configurar PWM");
+    Serial.println("Erro ao configurar PWM ou servo");
     setOnboardStatus(80, 0, 0);
   } else {
-    Serial.println("PWM configurado com sucesso");
+    Serial.println("PWM do LED e servo configurados com sucesso");
     setOnboardStatus(0, 80, 0);
   }
 
